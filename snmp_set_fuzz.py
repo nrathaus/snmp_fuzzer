@@ -373,7 +373,7 @@ class SnmpTarget(BaseTarget):
         for i in range(len(SNMP_Error_code)):
             if SNMP_Error_code[i][0] == code:
                 return SNMP_Error_code[i][1]
-        self.logger.error("Unknown Error Code: %s" % code)
+        self.logger.error(f"Unknown Error Code: {code}")
 
     def _is_target_alive(self):
         try:
@@ -395,8 +395,7 @@ class SnmpTarget(BaseTarget):
                     set_payload = copy.deepcopy(self.set_packets[test_case])
                     set_payload = self._create_fuzz_packet(set_payload)
                     self.logger.info(
-                        "Running test case No.%s %s/%s"
-                        % (test_case, i, self._fuzz_count)
+                        f"Running test case No.{test_case} {i}/{self._fuzz_count}"
                     )
                     self._save_sent_packet(set_payload)
                     set_rsp = sr1(
@@ -404,30 +403,27 @@ class SnmpTarget(BaseTarget):
                     )
                     if set_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp set packet in packet NO.%s,TestCase No.%s"
-                            % (i, test_case)
+                            "Target not response with snmp set packet in packet NO."
+                            f"{i},TestCase No.{test_case}"
                         )
                         if self._is_target_alive():
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                "Can't Connect to Target at TCP Port: %s"
-                                % self._monitor_port
+                                f"Can't Connect to Target at TCP Port: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
                     else:
                         self._save_sent_packet(set_rsp)
                         if set_rsp[scapy.layers.snmp.SNMP].PDU.error.val != 0:
+                            error_code = self._get_errror_code(
+                                set_rsp[scapy.layers.snmp.SNMP].PDU.error.val
+                            )
                             self.logger.warning(
-                                "Set failed with error code: %s in packet NO.%s,TestCase No.%s"
-                                % (
-                                    self._get_errror_code(
-                                        set_rsp[scapy.layers.snmp.SNMP].PDU.error.val
-                                    ),
-                                    i,
-                                    test_case,
-                                )
+                                "Set failed with error code: "
+                                f"{error_code} in packet NO.{i},"
+                                f"TestCase No.{test_case}"
                             )
                     # send get packet
                     get_payload = copy.deepcopy(self.set_packets[test_case])
@@ -438,15 +434,14 @@ class SnmpTarget(BaseTarget):
                     )
                     if get_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp get packet in packet NO.%s,TestCase No.%s"
-                            % (i, test_case)
+                            "Target not response with snmp get packet in packet "
+                            f"NO.{i},TestCase No.{test_case}"
                         )
                         if self._is_target_alive():
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                "Can't Connect to Target at TCP Port: %s"
-                                % self._monitor_port
+                                f"Can't Connect to Target at TCP Port: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
@@ -454,17 +449,12 @@ class SnmpTarget(BaseTarget):
                         self._save_sent_packet(get_rsp)
                         if get_rsp.haslayer(scapy.layers.snmp.SNMP):
                             if get_rsp[scapy.layers.snmp.SNMP].PDU.error.val != 0:
+                                error_code = self._get_errror_code(
+                                    get_rsp[scapy.layers.snmp.SNMP].PDU.error.val
+                                )
                                 self.logger.info(
-                                    "Get failed with error code %s in packet NO.%s,TestCase No.%s"
-                                    % (
-                                        self._get_errror_code(
-                                            get_rsp[
-                                                scapy.layers.snmp.SNMP
-                                            ].PDU.error.val
-                                        ),
-                                        i,
-                                        test_case,
-                                    )
+                                    "Get failed with error code "
+                                    f"{error_code} in packet NO.{i},TestCase No.{test_case}"
                                 )
 
                     # send get_next packet
