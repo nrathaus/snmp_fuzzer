@@ -20,6 +20,14 @@ Target = SnmpTarget(
     nic=nic,
     logger=logger,
 )
+
 Target.oid_scan(max_oids=10)
 
 Target.save_scan_result()
+
+Target.read_test_case_from_pcap(
+    f"./output/{target}_snmp_set_packet_list.pcap",
+)
+
+Target._fuzz_count = 100
+Target.fuzz()

@@ -101,13 +101,13 @@ class SnmpTarget(BaseTarget):
             "w",
             encoding="latin1",
         )
-        self._snmp_set_packets_file = (
+        self._snmp_set_packets_filename = (
             f"{self._output_path}/{self._target}_snmp_set_packet_list.pcap"
         )
-        self._snmp_crash_packets_file = (
+        self._snmp_crash_packets_filename = (
             f"{self._output_path}/{self._target}_snmp_crash_packets.pcap"
         )
-        self._snmp_sent_packets_file = (
+        self._snmp_sent_packets_filename = (
             f"{self._output_path}/"
             f"{self._target}_snmp_sent_packets_"
             f"{self._sent_packets_file_count}.pcap"
@@ -145,6 +145,7 @@ class SnmpTarget(BaseTarget):
         get_payload[scapy.layers.snmp.SNMP].PDU = scapy.layers.snmp.SNMPget(
             varbindlist=[scapy.layers.snmp.SNMPvarbind(oid=my_oid)]
         )
+
         # fix the packet
         del get_payload[scapy.layers.inet.IP].chksum
         del get_payload[scapy.layers.inet.IP].len
@@ -179,6 +180,7 @@ class SnmpTarget(BaseTarget):
             packet[scapy.layers.snmp.SNMP].PDU[
                 scapy.layers.snmp.SNMPvarbind
             ].value.val = str(self._get_asn_value_type(my_valtype))
+
         # fix the packet
         del packet[scapy.layers.inet.IP].chksum
         del packet[scapy.layers.inet.IP].len
@@ -276,7 +278,8 @@ class SnmpTarget(BaseTarget):
 
     def set_test_case_range(self, test_case_range=None):
         if test_case_range is None:
-            self._test_cases = range(len(self.set_packets))
+            max_cases = len(self.set_packets)
+            self._test_cases = range(max_cases)
         else:
             p_single = re.compile(r"(\d+)$")
             p_open_left = re.compile(r"-(\d+)$")
@@ -338,36 +341,39 @@ class SnmpTarget(BaseTarget):
             pass
 
     def save_scan_result(self):
-        for i in range(len(self.oid_list)):
-            self._oid_list_file.write(str(self.oid_list[i]))
-            self._oid_list_file.write("\r")
+        for oid in self.oid_list:
+            self._oid_list_file.write(f"{oid}\r")
 
-        for i in range(len(self.oid_write_list)):
-            self._oid_writeable_list_file.write(str(self.oid_write_list[i]))
-            self._oid_writeable_list_file.write("\r")
+        for oid in self.oid_write_list:
+            self._oid_writeable_list_file.write(f"{oid}\r")
 
-        wrpcap(self._snmp_set_packets_file, self.set_packets)
+        wrpcap(self._snmp_set_packets_filename, self.set_packets)
         self._oid_writeable_list_file.close()
         self._oid_list_file.close()
 
     def save_fuzz_result(self):
-        wrpcap(self._snmp_sent_packets_file, self._sent_packets)
-        wrpcap(self._snmp_crash_packets_file, self._crash_packets)
+        if len(self._sent_packets) > 0:
+            wrpcap(self._snmp_sent_packets_filename, self._sent_packets)
+
+        if len(self._crash_packets) > 0:
+            wrpcap(self._snmp_crash_packets_filename, self._crash_packets)
 
     def _save_sent_packet(self, packet):
         self._sent_packets.append(packet)
         if len(self._sent_packets) >= 200:
-            wrpcap(self._snmp_sent_packets_file, self._sent_packets)
+            wrpcap(self._snmp_sent_packets_filename, self._sent_packets)
             self._sent_packets = []
             self._sent_packets_file_count += 1
-            self._snmp_sent_packets_file = (
+            self._snmp_sent_packets_filename = (
                 f"{self._output_path}/"
                 f"{self._target}_snmp_sent_packets_"
                 f"{self._sent_packets_file_count}.pcap"
             )
 
-    def read_test_case_from_pcap(self, pcap_file):
-        self.set_packets = rdpcap(pcap_file)
+    def read_test_case_from_pcap(self, pcap_set_file):
+        """Read from the saved pcap files the packets for fuzzing"""
+        self.set_packets = rdpcap(pcap_set_file)
+        return len(self.set_packets) == 0
 
     def _get_asn_value_type(self, value_type):
         for i in range(len(ASN1_Type)):
@@ -391,11 +397,13 @@ class SnmpTarget(BaseTarget):
         return True
 
     def fuzz(self):
+        """Fuzz a given list of packets"""
         if not self._test_cases:
             self.set_test_case_range()
+
         for test_case in self._test_cases:
-            try:
-                for i in range(self._fuzz_count):
+            for i in range(self._fuzz_count):
+                try:
                     # send set packet
                     set_payload = copy.deepcopy(self.set_packets[test_case])
                     set_payload = self._create_fuzz_packet(set_payload)
@@ -404,12 +412,16 @@ class SnmpTarget(BaseTarget):
                     )
                     self._save_sent_packet(set_payload)
                     set_rsp = sr1(
-                        set_payload, timeout=self._timeout, verbose=0, iface=self._nic
+                        set_payload,
+                        timeout=self._timeout,
+                        verbose=0,
+                        iface=self._nic,
                     )
                     if set_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp set packet in packet NO."
-                            f"{i},TestCase No.{test_case}"
+                            "Target not response with snmp set packet in packet "
+                            f"NO.{i},"
+                            f"TestCase No.{test_case}"
                         )
                         if self._is_target_alive():
                             self.logger.info("Target is still alive!")
@@ -430,17 +442,22 @@ class SnmpTarget(BaseTarget):
                                 f"{error_code} in packet NO.{i},"
                                 f"TestCase No.{test_case}"
                             )
+
                     # send get packet
                     get_payload = copy.deepcopy(self.set_packets[test_case])
                     get_payload = self._create_get_request_by_packet(get_payload)
                     self._save_sent_packet(get_payload)
                     get_rsp = sr1(
-                        get_payload, timeout=self._timeout, verbose=0, iface=self._nic
+                        get_payload,
+                        timeout=self._timeout,
+                        verbose=0,
+                        iface=self._nic,
                     )
                     if get_rsp is None:
                         self.logger.warning(
                             "Target not response with snmp get packet in packet "
-                            f"NO.{i},TestCase No.{test_case}"
+                            f"NO.{i},"
+                            f"TestCase No.{test_case}"
                         )
                         if self._is_target_alive():
                             self.logger.info("Target is still alive!")
@@ -501,13 +518,12 @@ class SnmpTarget(BaseTarget):
                                     f"{error_code} in packet "
                                     f"NO.{i},TestCase No.{test_case}"
                                 )
+                except KeyboardInterrupt:
+                    self.save_fuzz_result()
+                    time.sleep(1)
+                    return
 
-            except KeyboardInterrupt:
-                self.save_fuzz_result()
-                time.sleep(1)
-                return
-
-            except:
-                self.save_fuzz_result()
-                self.logger.error(f"Unexpected error: {sys.exc_info()[0]}")
-                return
+                except:
+                    self.save_fuzz_result()
+                    self.logger.error(f"Unexpected error: {sys.exc_info()[0]}")
+                    return
