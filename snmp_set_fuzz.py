@@ -454,7 +454,8 @@ class SnmpTarget(BaseTarget):
                                 )
                                 self.logger.info(
                                     "Get failed with error code "
-                                    f"{error_code} in packet NO.{i},TestCase No.{test_case}"
+                                    f"{error_code} in packet NO.{i},"
+                                    f"TestCase No.{test_case}"
                                 )
 
                     # send get_next packet
@@ -471,15 +472,15 @@ class SnmpTarget(BaseTarget):
                     )
                     if get_next_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp get_next packet in packet NO.%s,TestCase No.%s"
-                            % (i, test_case)
+                            "Target not response with snmp get_next packet in packet "
+                            f"NO.{i},"
+                            f"TestCase No.{test_case}"
                         )
                         if self._is_target_alive():
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                "Can't Connect to Target at TCP Port: %s"
-                                % self._monitor_port
+                                f"Can't Connect to Target at TCP Port: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
@@ -487,17 +488,13 @@ class SnmpTarget(BaseTarget):
                         self._save_sent_packet(get_next_rsp)
                         if get_rsp.haslayer(scapy.layers.snmp.SNMP):
                             if get_next_rsp[scapy.layers.snmp.SNMP].PDU.error.val != 0:
+                                error_code = self._get_errror_code(
+                                    get_next_rsp[scapy.layers.snmp.SNMP].PDU.error.val
+                                )
                                 self.logger.info(
-                                    "Get_next failed with error code %s in packet NO.%s,TestCase No.%s"
-                                    % (
-                                        self._get_errror_code(
-                                            get_next_rsp[
-                                                scapy.layers.snmp.SNMP
-                                            ].PDU.error.val
-                                        ),
-                                        i,
-                                        test_case,
-                                    )
+                                    "Get_next failed with error code "
+                                    f"{error_code} in packet "
+                                    f"NO.{i},TestCase No.{test_case}"
                                 )
 
             except KeyboardInterrupt:
@@ -507,5 +504,5 @@ class SnmpTarget(BaseTarget):
 
             except:
                 self.save_fuzz_result()
-                self.logger.error("Unexpected error: %s" % sys.exc_info()[0])
+                self.logger.error(f"Unexpected error: {sys.exc_info()[0]}")
                 return
