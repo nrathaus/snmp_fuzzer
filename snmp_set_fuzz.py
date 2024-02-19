@@ -182,7 +182,7 @@ class SnmpTarget(BaseTarget):
                 get_payload, timeout=self._timeout, verbose=0, iface=self._nic
             )
             if get_rsp_payload:
-                self.logger.debug(str(get_rsp_payload).encode("hex"))
+                self.logger.debug(hexdump(get_rsp_payload))
                 self.logger.debug(get_rsp_payload.show(dump=True))
             try:
                 if self._oid == get_rsp_payload[SNMP].PDU[SNMPvarbind].oid.val:
