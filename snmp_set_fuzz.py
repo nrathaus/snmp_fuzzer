@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # coding:utf-8
 from scapy.all import *
+import scapy.layers.inet
+import scapy.layers.snmp
 
 from Base import BaseTarget
 
@@ -56,7 +58,7 @@ class SnmpTarget(BaseTarget):
     ):
         """
         :param name: Name of target
-        :param target: IP address of target
+        :param target: scapy.layers.inet.IP address of target
         :param monitor_port: Tcp port used to check target alive
         :param community: Snmp community with write privilege, default:'private'
         :param version: Snmp version only support version 1 and 2
@@ -111,106 +113,154 @@ class SnmpTarget(BaseTarget):
 
     def _create_get_request(self, my_oid):
         get_payload = (
-            IP(dst=self._target)
-            / UDP(sport=161, dport=161)
-            / SNMP(
+            scapy.layers.inet.IP(dst=self._target)
+            / scapy.layers.inet.UDP(sport=161, dport=161)
+            / scapy.layers.snmp.SNMP(
                 version=self._version,
                 community=self._community,
-                PDU=SNMPnext(varbindlist=[SNMPvarbind(oid=ASN1_OID(my_oid))]),
+                PDU=scapy.layers.snmp.SNMPnext(
+                    varbindlist=[scapy.layers.snmp.SNMPvarbind(oid=ASN1_OID(my_oid))]
+                ),
             )
         )
         return get_payload
 
     def _create_set_request(self, varbindlist):
         set_payload = (
-            IP(dst=self._target)
-            / UDP(sport=161, dport=161)
-            / SNMP(
+            scapy.layers.inet.IP(dst=self._target)
+            / scapy.layers.inet.UDP(sport=161, dport=161)
+            / scapy.layers.snmp.SNMP(
                 version=self._version,
                 community=self._community,
-                PDU=SNMPset(varbindlist=[varbindlist]),
+                PDU=scapy.layers.snmp.SNMPset(varbindlist=[varbindlist]),
             )
         )
         return set_payload
 
     def _create_get_request_by_packet(self, packet):
-        my_oid = packet[SNMP].PDU[SNMPvarbind].oid
+        my_oid = packet[scapy.layers.snmp.SNMP].PDU[scapy.layers.snmp.SNMPvarbind].oid
         get_payload = copy.deepcopy(packet)
-        get_payload[SNMP].PDU = SNMPget(varbindlist=[SNMPvarbind(oid=my_oid)])
+        get_payload[scapy.layers.snmp.SNMP].PDU = scapy.layers.snmp.SNMPget(
+            varbindlist=[scapy.layers.snmp.SNMPvarbind(oid=my_oid)]
+        )
         # fix the packet
-        del get_payload[IP].chksum
-        del get_payload[IP].len
-        del get_payload[UDP].chksum
-        del get_payload[UDP].len
+        del get_payload[scapy.layers.inet.IP].chksum
+        del get_payload[scapy.layers.inet.IP].len
+        del get_payload[scapy.layers.inet.UDP].chksum
+        del get_payload[scapy.layers.inet.UDP].len
         del get_payload.len
         return get_payload
 
     def _create_get_next_request_by_packet(self, packet):
-        my_oid = packet[SNMP].PDU[SNMPvarbind].oid
+        my_oid = packet[scapy.layers.snmp.SNMP].PDU[scapy.layers.snmp.SNMPvarbind].oid
         get_next_payload = copy.deepcopy(packet)
-        get_next_payload[SNMP].PDU = SNMPnext(varbindlist=[SNMPvarbind(oid=my_oid)])
+        get_next_payload[scapy.layers.snmp.SNMP].PDU = scapy.layers.snmp.SNMPnext(
+            varbindlist=[scapy.layers.snmp.SNMPvarbind(oid=my_oid)]
+        )
         # fix the packet
-        del get_next_payload[IP].chksum
-        del get_next_payload[IP].len
-        del get_next_payload[UDP].chksum
-        del get_next_payload[UDP].len
+        del get_next_payload[scapy.layers.inet.IP].chksum
+        del get_next_payload[scapy.layers.inet.IP].len
+        del get_next_payload[scapy.layers.inet.UDP].chksum
+        del get_next_payload[scapy.layers.inet.UDP].len
         del get_next_payload.len
         return get_next_payload
 
     def _create_fuzz_packet(self, packet):
-        my_valtype = packet[SNMP].PDU[SNMPvarbind].value
+        my_valtype = (
+            packet[scapy.layers.snmp.SNMP].PDU[scapy.layers.snmp.SNMPvarbind].value
+        )
         if isinstance(my_valtype, ASN1_Type[2][0]):
-            packet[SNMP].PDU[SNMPvarbind].value.val = self._get_asn_value_type(
-                my_valtype
-            )
+            packet[scapy.layers.snmp.SNMP].PDU[
+                scapy.layers.snmp.SNMPvarbind
+            ].value.val = self._get_asn_value_type(my_valtype)
         else:
-            packet[SNMP].PDU[SNMPvarbind].value.val = str(
-                self._get_asn_value_type(my_valtype)
-            )
+            packet[scapy.layers.snmp.SNMP].PDU[
+                scapy.layers.snmp.SNMPvarbind
+            ].value.val = str(self._get_asn_value_type(my_valtype))
         # fix the packet
-        del packet[IP].chksum
-        del packet[IP].len
-        del packet[UDP].chksum
-        del packet[UDP].len
+        del packet[scapy.layers.inet.IP].chksum
+        del packet[scapy.layers.inet.IP].len
+        del packet[scapy.layers.inet.UDP].chksum
+        del packet[scapy.layers.inet.UDP].len
         del packet.len
         return packet
 
     def oid_scan(self):
         while True:
+            self.logger.info(f"Querying {self._oid}")
             get_payload = self._create_get_request(self._oid)
             get_rsp_payload = sr1(
                 get_payload, timeout=self._timeout, verbose=0, iface=self._nic
             )
-            if get_rsp_payload:
-                self.logger.debug(hexdump(get_rsp_payload))
-                self.logger.debug(get_rsp_payload.show(dump=True))
+
+            if get_rsp_payload is None:
+                self.logger.info(
+                    f"No response received from target (verify community name: '{self._community}')"
+                )
+                continue
+
+            self.logger.debug(hexdump(get_rsp_payload))
+            self.logger.debug(get_rsp_payload.show(dump=True))
+
+            if get_rsp_payload.getlayer("ICMP"):
+                rsp_icmp = get_rsp_payload.getlayer("ICMP")
+                if (
+                    rsp_icmp.type == 3
+                    or rsp_icmp.code == 3  # dest unreach  # port-unreachable
+                ):
+                    self.logger.info("Port or Destination unreachable")
+                    break
+
             try:
-                if self._oid == get_rsp_payload[SNMP].PDU[SNMPvarbind].oid.val:
+                if (
+                    self._oid
+                    == get_rsp_payload[scapy.layers.snmp.SNMP]
+                    .PDU[scapy.layers.snmp.SNMPvarbind]
+                    .oid.val
+                ):
                     self.logger.info("End of MIB")
                     break
             except Exception as e:
                 self.logger.error(e)
                 break
             else:
-                self._oid = get_rsp_payload[SNMP].PDU[SNMPvarbind].oid.val
-                self.logger.info("Found oid :%s" % self._oid)
+                self._oid = (
+                    get_rsp_payload[scapy.layers.snmp.SNMP]
+                    .PDU[scapy.layers.snmp.SNMPvarbind]
+                    .oid.val
+                )
+                self.logger.info(f"Found oid: '{self._oid}")
                 oid_display = conf.mib._oidname(self._oid)
-                value_type = get_rsp_payload[SNMP].PDU[SNMPvarbind].value
-                value = get_rsp_payload[SNMP].PDU[SNMPvarbind].value.val
-                varbindlist = get_rsp_payload[SNMP].PDU[SNMPvarbind]
+                value_type = (
+                    get_rsp_payload[scapy.layers.snmp.SNMP]
+                    .PDU[scapy.layers.snmp.SNMPvarbind]
+                    .value
+                )
+                value = (
+                    get_rsp_payload[scapy.layers.snmp.SNMP]
+                    .PDU[scapy.layers.snmp.SNMPvarbind]
+                    .value.val
+                )
+                varbindlist = get_rsp_payload[scapy.layers.snmp.SNMP].PDU[
+                    scapy.layers.snmp.SNMPvarbind
+                ]
                 set_payload = self._create_set_request(varbindlist)
                 try:
                     set_rsp = sr1(
                         set_payload, timeout=self._timeout, verbose=0, iface=self._nic
                     )
-                    if set_rsp[SNMP].PDU.error.val not in snmp_error_id:
-                        self.logger.info("%s is writeable" % self._oid)
+                    if (
+                        set_rsp is not None
+                        and set_rsp[scapy.layers.snmp.SNMP].PDU.error.val
+                        not in snmp_error_id
+                    ):
+                        self.logger.info(f"'{self._oid}' is writeable")
                         self.oid_write_list.append(
                             (oid_display, self._oid, type(value_type), value)
                         )
                         self.set_packets.append(set_payload)
-                except:
-                    self.logger.error("Time Out")
+                except Exception as exception:
+                    self.logger.error(f"Exception: {exception}")
                 self.oid_list.append((oid_display, self._oid, type(value_type), value))
                 time.sleep(0.3)
 
@@ -315,7 +365,7 @@ class SnmpTarget(BaseTarget):
                 return ASN1_Type[i][1]
 
     def _get_errror_code(self, code):
-        for i in range(len(SNMP_Error_code)):
+        for i in range(len(scapy.layers.snmp.SNMP_Error_code)):
             if SNMP_Error_code[i][0] == code:
                 return SNMP_Error_code[i][1]
         self.logger.error("Unknown Error Code: %s" % code)
@@ -363,11 +413,13 @@ class SnmpTarget(BaseTarget):
                             return
                     else:
                         self._save_sent_packet(set_rsp)
-                        if set_rsp[SNMP].PDU.error.val != 0:
+                        if set_rsp[scapy.layers.snmp.SNMP].PDU.error.val != 0:
                             self.logger.warning(
                                 "Set failed with error code: %s in packet NO.%s,TestCase No.%s"
                                 % (
-                                    self._get_errror_code(set_rsp[SNMP].PDU.error.val),
+                                    self._get_errror_code(
+                                        set_rsp[scapy.layers.snmp.SNMP].PDU.error.val
+                                    ),
                                     i,
                                     test_case,
                                 )
@@ -395,13 +447,15 @@ class SnmpTarget(BaseTarget):
                             return
                     else:
                         self._save_sent_packet(get_rsp)
-                        if get_rsp.haslayer(SNMP):
-                            if get_rsp[SNMP].PDU.error.val != 0:
+                        if get_rsp.haslayer(scapy.layers.snmp.SNMP):
+                            if get_rsp[scapy.layers.snmp.SNMP].PDU.error.val != 0:
                                 self.logger.info(
                                     "Get failed with error code %s in packet NO.%s,TestCase No.%s"
                                     % (
                                         self._get_errror_code(
-                                            get_rsp[SNMP].PDU.error.val
+                                            get_rsp[
+                                                scapy.layers.snmp.SNMP
+                                            ].PDU.error.val
                                         ),
                                         i,
                                         test_case,
@@ -436,13 +490,15 @@ class SnmpTarget(BaseTarget):
                             return
                     else:
                         self._save_sent_packet(get_next_rsp)
-                        if get_rsp.haslayer(SNMP):
-                            if get_next_rsp[SNMP].PDU.error.val != 0:
+                        if get_rsp.haslayer(scapy.layers.snmp.SNMP):
+                            if get_next_rsp[scapy.layers.snmp.SNMP].PDU.error.val != 0:
                                 self.logger.info(
                                     "Get_next failed with error code %s in packet NO.%s,TestCase No.%s"
                                     % (
                                         self._get_errror_code(
-                                            get_next_rsp[SNMP].PDU.error.val
+                                            get_next_rsp[
+                                                scapy.layers.snmp.SNMP
+                                            ].PDU.error.val
                                         ),
                                         i,
                                         test_case,
