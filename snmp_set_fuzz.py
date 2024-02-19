@@ -92,10 +92,14 @@ class SnmpTarget(BaseTarget):
         if not os.path.exists(self._output_path):
             os.mkdir(self._output_path)
         self._oid_list_file = open(
-            "%s/%s_oid_list_file.txt" % (self._output_path, self._target), "w"
+            f"{self._output_path}/{self._target}_oid_list_file.txt",
+            "w",
+            encoding="latin1",
         )
         self._oid_writeable_list_file = open(
-            "%s/%s_oid_writeable_list_file.txt" % (self._output_path, self._target), "w"
+            f"{self._output_path}/{self._target}_oid_writeable_list_file.txt",
+            "w",
+            encoding="latin1",
         )
         self._snmp_set_packets_file = "%s/%s_snmp_set_packet_list.pcap" % (
             self._output_path,
@@ -199,14 +203,14 @@ class SnmpTarget(BaseTarget):
                 )
                 continue
 
-            self.logger.debug(hexdump(get_rsp_payload))
+            self.logger.debug(hexdump(get_rsp_payload, dump=True))
             self.logger.debug(get_rsp_payload.show(dump=True))
 
             if get_rsp_payload.getlayer("ICMP"):
                 rsp_icmp = get_rsp_payload.getlayer("ICMP")
                 if (
-                    rsp_icmp.type == 3
-                    or rsp_icmp.code == 3  # dest unreach  # port-unreachable
+                    rsp_icmp.type == 3  # port-unreachable
+                    or rsp_icmp.code == 3  # dest unreach
                 ):
                     self.logger.info("Port or Destination unreachable")
                     break
@@ -220,8 +224,9 @@ class SnmpTarget(BaseTarget):
                 ):
                     self.logger.info("End of MIB")
                     break
-            except Exception as e:
-                self.logger.error(e)
+            except Exception as exception:
+                error_msg = f"Exception: {exception}"
+                self.logger.error(error_msg)
                 break
             else:
                 self._oid = (
@@ -314,7 +319,7 @@ class SnmpTarget(BaseTarget):
                     continue
 
                 # invalid expression
-                raise Exception("Invalid range found: %s" % entry)
+                raise Exception(f"Invalid range found: {entry}")
             as_set = set(self._test_cases)
             if len(as_set) < len(self._test_cases):
                 raise Exception("Overlapping ranges in range list")
@@ -350,10 +355,10 @@ class SnmpTarget(BaseTarget):
             wrpcap(self._snmp_sent_packets_file, self._sent_packets)
             self._sent_packets = []
             self._sent_packets_file_count += 1
-            self._snmp_sent_packets_file = "%s/%s_snmp_sent_packets_%s.pcap" % (
-                self._output_path,
-                self._target,
-                str(self._sent_packets_file_count),
+            self._snmp_sent_packets_file = (
+                f"{self._output_path}/"
+                f"{self._target}_snmp_sent_packets_"
+                f"{self._sent_packets_file_count}.pcap"
             )
 
     def read_test_case_from_pcap(self, pcap_file):
@@ -365,7 +370,7 @@ class SnmpTarget(BaseTarget):
                 return ASN1_Type[i][1]
 
     def _get_errror_code(self, code):
-        for i in range(len(scapy.layers.snmp.SNMP_Error_code)):
+        for i in range(len(SNMP_Error_code)):
             if SNMP_Error_code[i][0] == code:
                 return SNMP_Error_code[i][1]
         self.logger.error("Unknown Error Code: %s" % code)
