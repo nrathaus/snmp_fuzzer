@@ -101,18 +101,16 @@ class SnmpTarget(BaseTarget):
             "w",
             encoding="latin1",
         )
-        self._snmp_set_packets_file = "%s/%s_snmp_set_packet_list.pcap" % (
-            self._output_path,
-            self._target,
+        self._snmp_set_packets_file = (
+            f"{self._output_path}/{self._target}_snmp_set_packet_list.pcap"
         )
-        self._snmp_crash_packets_file = "%s/%s_snmp_crash_packets.pcap" % (
-            self._output_path,
-            self._target,
+        self._snmp_crash_packets_file = (
+            f"{self._output_path}/{self._target}_snmp_crash_packets.pcap"
         )
-        self._snmp_sent_packets_file = "%s/%s_snmp_sent_packets_%s.pcap" % (
-            self._output_path,
-            self._target,
-            str(self._sent_packets_file_count),
+        self._snmp_sent_packets_file = (
+            f"{self._output_path}/"
+            f"{self._target}_snmp_sent_packets_"
+            f"{self._sent_packets_file_count}.pcap"
         )
 
     def _create_get_request(self, my_oid):
@@ -189,9 +187,13 @@ class SnmpTarget(BaseTarget):
         del packet.len
         return packet
 
-    def oid_scan(self):
-        while True:
-            self.logger.info(f"Querying {self._oid}")
+    def oid_scan(self, max_oids: int = 100):
+        """
+        Scan target for available oids
+         * max_oids - maximum number of oids to query (default: 100)
+        """
+        while len(self.oid_list) < max_oids:
+            self.logger.info(f"Querying: {self._oid}")
             get_payload = self._create_get_request(self._oid)
             get_rsp_payload = sr1(
                 get_payload, timeout=self._timeout, verbose=0, iface=self._nic
@@ -234,7 +236,9 @@ class SnmpTarget(BaseTarget):
                     .PDU[scapy.layers.snmp.SNMPvarbind]
                     .oid.val
                 )
-                self.logger.info(f"Found oid: '{self._oid}")
+                self.logger.info(
+                    f"Found oid: '{self._oid} (oid #{len(self.oid_list)+1} out of {max_oids})"
+                )
                 oid_display = conf.mib._oidname(self._oid)
                 value_type = (
                     get_rsp_payload[scapy.layers.snmp.SNMP]
@@ -266,6 +270,7 @@ class SnmpTarget(BaseTarget):
                         self.set_packets.append(set_payload)
                 except Exception as exception:
                     self.logger.error(f"Exception: {exception}")
+
                 self.oid_list.append((oid_display, self._oid, type(value_type), value))
                 time.sleep(0.3)
 
