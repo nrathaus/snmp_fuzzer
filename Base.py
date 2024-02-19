@@ -74,7 +74,7 @@ class BaseTarget(object):
         :param func_name: name of unimplemented function.
         :raise: NotImplementedError detailing the function the is not implemented.
         """
-        msg = "%s is not overridden by %s" % (func_name, type(self).__name__)
+        msg = f"{func_name} is not overridden by {type(self).__name__}"
         self.logger.error(msg)
         raise NotImplementedError(msg)
 
