@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # coding:utf-8
+import socket
+
 from scapy.all import *
 import scapy.layers.inet
 import scapy.layers.snmp
@@ -65,7 +67,7 @@ class SnmpTarget(BaseTarget):
         :param oid: Snmp scan start oid, default: '.1'
         :param output_path: Path to store scan result
         :param fuzz_count: Fuzz count of each writable oid
-        :param timeout: Timeout for connect
+        :param timeout: Timeout for connect (float, in seconds)
         :param nic: Network interface name which used to connect to target
         :param logger: Logger of this target
         """
@@ -113,30 +115,38 @@ class SnmpTarget(BaseTarget):
             f"{self._sent_packets_file_count}.pcap"
         )
 
-    def _create_get_request(self, my_oid):
-        get_payload = (
-            scapy.layers.inet.IP(dst=self._target)
-            / scapy.layers.inet.UDP(sport=161, dport=161)
-            / scapy.layers.snmp.SNMP(
-                version=self._version,
-                community=self._community,
-                PDU=scapy.layers.snmp.SNMPnext(
-                    varbindlist=[scapy.layers.snmp.SNMPvarbind(oid=ASN1_OID(my_oid))]
-                ),
-            )
+    def _create_get_request(self, my_oid, include_headers: bool = True):
+        get_payload = scapy.layers.snmp.SNMP(
+            version=self._version,
+            community=self._community,
+            PDU=scapy.layers.snmp.SNMPnext(
+                varbindlist=[scapy.layers.snmp.SNMPvarbind(oid=ASN1_OID(my_oid))]
+            ),
         )
+
+        if include_headers:
+            get_payload = (
+                scapy.layers.inet.IP(dst=self._target)
+                / scapy.layers.inet.UDP(sport=161, dport=161)
+                / get_payload
+            )
+
         return get_payload
 
-    def _create_set_request(self, varbindlist):
-        set_payload = (
-            scapy.layers.inet.IP(dst=self._target)
-            / scapy.layers.inet.UDP(sport=161, dport=161)
-            / scapy.layers.snmp.SNMP(
-                version=self._version,
-                community=self._community,
-                PDU=scapy.layers.snmp.SNMPset(varbindlist=[varbindlist]),
-            )
+    def _create_set_request(self, varbindlist, include_headers: bool = True):
+        set_payload = scapy.layers.snmp.SNMP(
+            version=self._version,
+            community=self._community,
+            PDU=scapy.layers.snmp.SNMPset(varbindlist=[varbindlist]),
         )
+
+        if include_headers:
+            set_payload = (
+                scapy.layers.inet.IP(dst=self._target)
+                / scapy.layers.inet.UDP(sport=161, dport=161)
+                / set_payload
+            )
+
         return set_payload
 
     def _create_get_request_by_packet(self, packet):
@@ -189,30 +199,79 @@ class SnmpTarget(BaseTarget):
         del packet.len
         return packet
 
-    def oid_scan(self, max_oids: int = 100):
+    def oid_scan(self, use_socket: bool = False, max_oids: int = 100):
         """
         Scan target for available oids
+         * use_socket - defined to whether use scapy send, or socket send
          * max_oids - maximum number of oids to query (default: 100)
         """
 
         retry = 0
         while len(self.oid_list) < max_oids:
             self.logger.info(f"Querying: {self._oid}")
-            get_payload = self._create_get_request(self._oid)
-            get_rsp_payload = sr1(
-                get_payload, timeout=self._timeout, verbose=0, iface=self._nic
+            get_payload = self._create_get_request(
+                self._oid, include_headers=(not use_socket)
             )
 
-            if get_rsp_payload is None:
-                self.logger.info(
-                    f"No response received from target (verify community name: '{self._community}') (retry #{retry})"
-                )
-                retry += 1
+            get_rsp_payload = None
+            if use_socket:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect((self._target, self._monitor_port))
+                s.settimeout(self._timeout)
+                s.send(bytes(get_payload))
 
-                if retry > 5:
+                res = None
+                try:
+                    res = s.recv(1024)
+                except Exception as exception:
+                    self.logger.info(
+                        f"An exception has occurred during 'get_payload' recv(): {exception}"
+                    )
+                    pass
+
+                s.close()
+
+                if res is None:
+                    retry += 1
+
+                    self.logger.info(
+                        f"No response received from target (verify community name: '{self._community}') (retry #{retry})"
+                    )
+
+                    if retry > 5:
+                        break
+
+                    time.sleep(self._timeout)
+                    continue
+
+                try:
+                    get_rsp_payload = (
+                        scapy.layers.inet.IP(dst=self._target)
+                        / scapy.layers.inet.UDP(sport=161, dport=161)
+                        / scapy.layers.snmp.SNMP(_pkt=res, version=2)
+                    )
+                except Exception as exception:
+                    self.logger.error(
+                        f"Failed to handle SNMP packet:\n"
+                        f"{hexdump(res, dump=True)}\n"
+                        f"Exception: {exception}"
+                    )
                     break
+            else:
+                get_rsp_payload = sr1(
+                    get_payload, timeout=self._timeout, verbose=0, iface=self._nic
+                )
 
-                continue
+                if get_rsp_payload is None:
+                    self.logger.debug(
+                        f"No response received from target (verify community name: '{self._community}') (retry #{retry})"
+                    )
+                    retry += 1
+
+                    if retry > 5:
+                        break
+
+                    continue
 
             self.logger.debug(hexdump(get_rsp_payload, dump=True))
             self.logger.debug(get_rsp_payload.show(dump=True))
@@ -244,49 +303,86 @@ class SnmpTarget(BaseTarget):
                 error_msg = f"Exception: {exception}"
                 self.logger.error(error_msg)
                 break
-            else:
-                self._oid = (
-                    get_rsp_payload[scapy.layers.snmp.SNMP]
-                    .PDU[scapy.layers.snmp.SNMPvarbind]
-                    .oid.val
-                )
-                self.logger.info(
-                    f"Found oid: '{self._oid} (oid #{len(self.oid_list)+1} out of {max_oids})"
-                )
-                oid_display = conf.mib._oidname(self._oid)
-                value_type = (
-                    get_rsp_payload[scapy.layers.snmp.SNMP]
-                    .PDU[scapy.layers.snmp.SNMPvarbind]
-                    .value
-                )
-                value = (
-                    get_rsp_payload[scapy.layers.snmp.SNMP]
-                    .PDU[scapy.layers.snmp.SNMPvarbind]
-                    .value.val
-                )
-                varbindlist = get_rsp_payload[scapy.layers.snmp.SNMP].PDU[
-                    scapy.layers.snmp.SNMPvarbind
-                ]
-                set_payload = self._create_set_request(varbindlist)
-                try:
-                    set_rsp = sr1(
-                        set_payload, timeout=self._timeout, verbose=0, iface=self._nic
-                    )
-                    if (
-                        set_rsp is not None
-                        and set_rsp[scapy.layers.snmp.SNMP].PDU.error.val
-                        not in snmp_error_id
-                    ):
-                        self.logger.info(f"'{self._oid}' is writeable")
-                        self.oid_write_list.append(
-                            (oid_display, self._oid, type(value_type), value)
-                        )
-                        self.set_packets.append(set_payload)
-                except Exception as exception:
-                    self.logger.error(f"Exception: {exception}")
 
-                self.oid_list.append((oid_display, self._oid, type(value_type), value))
-                time.sleep(0.3)
+            value = (
+                get_rsp_payload[scapy.layers.snmp.SNMP]
+                .PDU[scapy.layers.snmp.SNMPvarbind]
+                .value
+            )
+
+            self._oid = (
+                get_rsp_payload[scapy.layers.snmp.SNMP]
+                .PDU[scapy.layers.snmp.SNMPvarbind]
+                .oid.val
+            )
+            self.logger.info(
+                f"Found oid: '{self._oid}' with value '{value}' (oid #{len(self.oid_list)+1} out of {max_oids})"
+            )
+
+            oid_display = conf.mib._oidname(self._oid)
+            value_type = (
+                get_rsp_payload[scapy.layers.snmp.SNMP]
+                .PDU[scapy.layers.snmp.SNMPvarbind]
+                .value
+            )
+
+            value = (
+                get_rsp_payload[scapy.layers.snmp.SNMP]
+                .PDU[scapy.layers.snmp.SNMPvarbind]
+                .value.val
+            )
+
+            varbindlist = get_rsp_payload[scapy.layers.snmp.SNMP].PDU[
+                scapy.layers.snmp.SNMPvarbind
+            ]
+
+            # Try to see if we can 'set'
+            set_payload = self._create_set_request(
+                varbindlist, include_headers=(not use_socket)
+            )
+
+            set_rsp = None
+            if use_socket:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect((self._target, self._monitor_port))
+                s.settimeout(self._timeout)
+                s.send(bytes(set_payload))
+
+                res = None
+                try:
+                    res = s.recv(1024)
+                except Exception as exception:
+                    self.logger.debug(
+                        f"An exception has occurred during 'set_payload' recv(): {exception}"
+                    )
+                    pass
+
+                s.close()
+
+                if res is not None:
+                    set_rsp = (
+                        scapy.layers.inet.IP(dst=self._target)
+                        / scapy.layers.inet.UDP(sport=161, dport=161)
+                        / scapy.layers.snmp.SNMP(_pkt=res)
+                    )
+            else:
+                set_rsp = sr1(
+                    set_payload, timeout=self._timeout, verbose=0, iface=self._nic
+                )
+
+            if (
+                set_rsp is not None
+                and set_rsp[scapy.layers.snmp.SNMP].PDU.error.val not in snmp_error_id
+            ):
+                self.logger.info(f"'{self._oid}' is writeable")
+                self.oid_write_list.append(
+                    (oid_display, self._oid, type(value_type), value)
+                )
+                self.set_packets.append(set_payload)
+
+            self.oid_list.append((oid_display, self._oid, type(value_type), value))
+            # sr1 and recv already have a timeout, no need for another:
+            # time.sleep(0.05)
 
     def set_test_case_range(self, test_case_range=None):
         if test_case_range is None:
