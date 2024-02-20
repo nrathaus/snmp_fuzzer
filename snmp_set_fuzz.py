@@ -202,7 +202,7 @@ class SnmpTarget(BaseTarget):
     def oid_scan(self, use_socket: bool = False, max_oids: int = 100):
         """
         Scan target for available oids
-         * use_socket - defined to whether use scapy send, or socket send
+         * use_socket - define to whether use scapy send, or socket send
          * max_oids - maximum number of oids to query (default: 100)
         """
 
@@ -385,6 +385,7 @@ class SnmpTarget(BaseTarget):
             # time.sleep(0.05)
 
     def set_test_case_range(self, test_case_range=None):
+        """Built test cases based on the provided `set_packets`"""
         if test_case_range is None:
             max_cases = len(self.set_packets)
             self._test_cases = range(max_cases)
@@ -449,6 +450,7 @@ class SnmpTarget(BaseTarget):
             pass
 
     def save_scan_result(self):
+        """Save the results into files"""
         for oid in self.oid_list:
             self._oid_list_file.write(f"{oid}\r")
 
@@ -460,6 +462,7 @@ class SnmpTarget(BaseTarget):
         self._oid_list_file.close()
 
     def save_fuzz_result(self):
+        """Save the fuzz results into files"""
         if len(self._sent_packets) > 0:
             wrpcap(self._snmp_sent_packets_filename, self._sent_packets)
 
@@ -484,15 +487,21 @@ class SnmpTarget(BaseTarget):
         return len(self.set_packets) == 0
 
     def _get_asn_value_type(self, value_type):
+        """Return the ASN Value Type"""
         for i in range(len(ASN1_Type)):
             if isinstance(value_type, ASN1_Type[i][0]) is True:
                 return ASN1_Type[i][1]
 
+        return None
+
     def _get_errror_code(self, code):
+        """Return the SNMP error value"""
         for i in range(len(SNMP_Error_code)):
             if SNMP_Error_code[i][0] == code:
                 return SNMP_Error_code[i][1]
+
         self.logger.error(f"Unknown Error Code: {code}")
+        return None
 
     def _is_target_alive(self):
         """
