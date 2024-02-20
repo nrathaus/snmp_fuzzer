@@ -194,6 +194,8 @@ class SnmpTarget(BaseTarget):
         Scan target for available oids
          * max_oids - maximum number of oids to query (default: 100)
         """
+
+        retry = 0
         while len(self.oid_list) < max_oids:
             self.logger.info(f"Querying: {self._oid}")
             get_payload = self._create_get_request(self._oid)
@@ -203,8 +205,13 @@ class SnmpTarget(BaseTarget):
 
             if get_rsp_payload is None:
                 self.logger.info(
-                    f"No response received from target (verify community name: '{self._community}')"
+                    f"No response received from target (verify community name: '{self._community}') (retry #{retry})"
                 )
+                retry += 1
+
+                if retry > 5:
+                    break
+
                 continue
 
             self.logger.debug(hexdump(get_rsp_payload, dump=True))
@@ -223,6 +230,7 @@ class SnmpTarget(BaseTarget):
                     f"Got a ICMP packet back: {get_rsp_payload.show(dump=True)}"
                 )
 
+            retry = 0
             try:
                 if (
                     self._oid
@@ -402,18 +410,34 @@ class SnmpTarget(BaseTarget):
         if len(self.oid_list) > 0:
             oid = self.oid_list[0]
 
-        get_payload = self._create_get_request(oid)
-        get_rsp_payload = sr1(
-            get_payload, timeout=self._timeout, verbose=0, iface=self._nic
-        )
+        failed = 0
+        count = 0  # Try 2 times to "ping"
+        while count < 5:
+            count += 1
+            self.logger.debug(
+                f"Checking if {self._target} is responding to get SNMP packet (attempt #{count})"
+            )
 
-        if get_rsp_payload is None:
-            return False
+            get_payload = self._create_get_request(oid)
+            get_rsp_payload = sr1(
+                get_payload, timeout=self._timeout, verbose=0, iface=self._nic
+            )
 
-        if get_rsp_payload.getlayer("ICMP"):
-            return False
+            if get_rsp_payload is None:
+                failed += 1
+                time.sleep(0.1)
+                continue
 
-        return True
+            if get_rsp_payload.getlayer("ICMP"):
+                failed += 1
+                time.sleep(0.1)
+                continue
+
+            failed = 0
+            self.logger.debug("Got a response")
+            break
+
+        return failed == 0
 
     def fuzz(self):
         """Fuzz a given list of packets"""
@@ -446,7 +470,7 @@ class SnmpTarget(BaseTarget):
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                f"Target seems to no longer respond: {self._monitor_port}"
+                                f"Target seems to no longer respond to UDP traffic on port: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
@@ -482,7 +506,7 @@ class SnmpTarget(BaseTarget):
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                f"Target seems to no longer respond: {self._monitor_port}"
+                                f"Target seems to no longer respond to UDP traffic on port: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
@@ -521,7 +545,7 @@ class SnmpTarget(BaseTarget):
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                f"Target seems to no longer respond: {self._monitor_port}"
+                                f"Target seems to no longer respond to UDP traffic on port: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
