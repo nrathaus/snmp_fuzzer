@@ -219,6 +219,10 @@ class SnmpTarget(BaseTarget):
                     self.logger.info("Port or Destination unreachable")
                     break
 
+                self.logger.info(
+                    f"Got a ICMP packet back: {get_rsp_payload.show(dump=True)}"
+                )
+
             try:
                 if (
                     self._oid
@@ -387,13 +391,28 @@ class SnmpTarget(BaseTarget):
         self.logger.error(f"Unknown Error Code: {code}")
 
     def _is_target_alive(self):
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(self._timeout)
-            s.connect((self._target, self._monitor_port))
-            s.close()
-        except:
+        """
+        Check if the target is online:
+        1. If we have an oid in the oid_list, try to "get" it
+        2. If we don't have an oid in the oid_list, try to UDP "ping"
+        """
+
+        oid = ".1.3"
+
+        if len(self.oid_list) > 0:
+            oid = self.oid_list[0]
+
+        get_payload = self._create_get_request(oid)
+        get_rsp_payload = sr1(
+            get_payload, timeout=self._timeout, verbose=0, iface=self._nic
+        )
+
+        if get_rsp_payload is None:
             return False
+
+        if get_rsp_payload.getlayer("ICMP"):
+            return False
+
         return True
 
     def fuzz(self):
@@ -419,7 +438,7 @@ class SnmpTarget(BaseTarget):
                     )
                     if set_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp set packet in packet "
+                            "Target did not respond with SNMP set packet in packet "
                             f"NO.{i},"
                             f"TestCase No.{test_case}"
                         )
@@ -427,7 +446,7 @@ class SnmpTarget(BaseTarget):
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                f"Can't Connect to Target at TCP Port: {self._monitor_port}"
+                                f"Target seems to no longer respond: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
@@ -455,7 +474,7 @@ class SnmpTarget(BaseTarget):
                     )
                     if get_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp get packet in packet "
+                            "Target not respond with SNMP get packet in packet "
                             f"NO.{i},"
                             f"TestCase No.{test_case}"
                         )
@@ -463,7 +482,7 @@ class SnmpTarget(BaseTarget):
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                f"Can't Connect to Target at TCP Port: {self._monitor_port}"
+                                f"Target seems to no longer respond: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
@@ -494,7 +513,7 @@ class SnmpTarget(BaseTarget):
                     )
                     if get_next_rsp is None:
                         self.logger.warning(
-                            "Target not response with snmp get_next packet in packet "
+                            "Target not respond with SNMP get_next packet in packet "
                             f"NO.{i},"
                             f"TestCase No.{test_case}"
                         )
@@ -502,7 +521,7 @@ class SnmpTarget(BaseTarget):
                             self.logger.info("Target is still alive!")
                         else:
                             self.logger.error(
-                                f"Can't Connect to Target at TCP Port: {self._monitor_port}"
+                                f"Target seems to no longer respond: {self._monitor_port}"
                             )
                             self._crash_packets.append(set_payload)
                             return
